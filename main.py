@@ -3,6 +3,11 @@ import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse
 from typing import Optional
+from PIL import Image
+from io import BytesIO
+import uuid
+import os
+from starlette.responses import FileResponse
 
 app = FastAPI()
 
@@ -11,6 +16,33 @@ if not AIORNOT_API_KEY:
     raise ValueError("AIORNOT_API_KEY environment variable not set")
 
 AIORNOT_API_BASE_URL = "https://api.aiornot.com"
+TEMP_IMAGE_DIR = "/tmp/ai_media_detector_images"
+os.makedirs(TEMP_IMAGE_DIR, exist_ok=True)
+
+@app.get("/temp_images/{image_name}")
+async def serve_temp_image(image_name: str):
+    file_path = os.path.join(TEMP_IMAGE_DIR, image_name)
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    raise HTTPException(status_code=404, detail="Image not found")
+
+async def get_exif_data(content: bytes) -> str:
+    """
+    Extracts and formats EXIF data from image content.
+    """
+    try:
+        image = Image.open(BytesIO(content))
+        exif_data = image._getexif()
+        if not exif_data:
+            return "No EXIF data found."
+
+        exif_info = "<strong>EXIF Data:</strong><br>"
+        for tag, value in exif_data.items():
+            tag_name = Image.TAGS.get(tag, tag)
+            exif_info += f"{tag_name}: {value}<br>"
+        return exif_info
+    except Exception as e:
+        return f"Could not read EXIF data: {e}"
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
@@ -21,7 +53,26 @@ async def read_root():
     <!DOCTYPE html>
     <html lang="en">
     <head>
-        <title>AI Media Detector</title>
+        <title>AI Media Detector | Detect AI-Generated Images & Videos</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="description" content="A powerful and easy-to-use tool to detect AI-generated media. Upload an image or video to analyze and determine if it was created by artificial intelligence.">
+        <meta name="keywords" content="AI detector, deepfake detector, AI image detector, AI video detector, media analysis, content authenticity">
+
+        <!-- Open Graph / Facebook -->
+        <meta property="og:type" content="website">
+        <meta property="og:url" content="https://ai-media-detector.onrender.com/">
+        <meta property="og:title" content="AI Media Detector | Detect AI-Generated Images & Videos">
+        <meta property="og:description" content="A powerful and easy-to-use tool to detect AI-generated media. Upload an image or video to analyze and determine if it was created by artificial intelligence.">
+        <meta property="og:image" content="https://via.placeholder.com/1200x630.png?text=AI+Media+Detector">
+
+        <!-- Twitter -->
+        <meta property="twitter:card" content="summary_large_image">
+        <meta property="twitter:url" content="https://ai-media-detector.onrender.com/">
+        <meta property="twitter:title" content="AI Media Detector | Detect AI-Generated Images & Videos">
+        <meta property="twitter:description" content="A powerful and easy-to-use tool to detect AI-generated media. Upload an image or video to analyze and determine if it was created by artificial intelligence.">
+        <meta property="twitter:image" content="https://via.placeholder.com/1200x630.png?text=AI+Media+Detector">
+        
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
 
@@ -142,12 +193,13 @@ async def read_root():
         <div class="container">
             <h1>AI Media Detector</h1>
             <form id="uploadForm" enctype="multipart/form-data" method="post">
-                <label for="file-upload" class="file-upload-label">
-                    <span id="file-label-text">Click to browse or drag & drop a file</span>
+                <label for="file-upload" class="file-upload-label" title="Upload an image to detect if it's AI-generated. Video support coming soon!">
+                    <span id="file-label-text">Click to browse or drag & drop an image</span>
                 </label>
-                <input id="file-upload" name="file" type="file" accept="image/*,video/*">
+                <input id="file-upload" name="file" type="file" accept="image/*">
                 <div id="fileName"></div>
                 <button type="submit" class="upload-button">Analyze</button>
+                <p style="font-size: 0.8em; color: #888; margin-top: 1.5em;">Video detection coming soon!</p>
             </form>
             <div id="progress-container">
                 <div id="progress-bar"></div>
@@ -216,7 +268,11 @@ async def read_root():
                     
                     if (xhr.status >= 200 && xhr.status < 300) {
                         const data = JSON.parse(xhr.responseText);
-                        resultDiv.innerHTML = `<strong>Analysis Result for ${data.filename}:</strong><br>${data.detection_result}`;
+                        let resultHtml = `<strong>Analysis Result for ${data.filename}:</strong><br>${data.detection_result}<br><br>${data.additional_info}<br><br>${data.exif_data}`;
+                        if (data.google_reverse_search_url) {
+                            resultHtml += `<br><br><a href="${data.google_reverse_search_url}" target="_blank">Search for this image on Google</a>`;
+                        }
+                        resultDiv.innerHTML = resultHtml;
                     } else {
                         try {
                             const errorData = JSON.parse(xhr.responseText);
@@ -277,6 +333,15 @@ async def create_upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="AIORNOT_API_KEY not configured on the server.")
 
     content = await file.read()
+    
+    # Save image temporarily to serve it for Google Reverse Image Search
+    unique_filename = f"{uuid.uuid4()}_{file.filename}"
+    temp_file_path = os.path.join(TEMP_IMAGE_DIR, unique_filename)
+    with open(temp_file_path, "wb") as f:
+        f.write(content)
+
+    public_image_url = f"/temp_images/{unique_filename}"
+    google_reverse_search_url = f"https://www.google.com/searchbyimage?image_url={public_image_url}"
 
     headers = {
         "Authorization": f"Bearer {AIORNOT_API_KEY}",
@@ -285,14 +350,10 @@ async def create_upload_file(file: UploadFile = File(...)):
 
     mime_type = file.content_type
     
-    if mime_type.startswith("image/"):
-        detection_endpoint = f"{AIORNOT_API_BASE_URL}/v2/image/sync"
-    elif mime_type.startswith("video/"):
-        # For video, AI or Not might require a two-step process (upload then poll)
-        # For now, we'll return a message indicating it's not fully implemented.
-        return {"filename": file.filename, "detection_result": "Video detection is not fully implemented yet."}
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported file type.")
+    if not mime_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Unsupported file type. Please upload an image.")
+
+    detection_endpoint = f"{AIORNOT_API_BASE_URL}/v2/image/sync"
 
     try:
         response = requests.post(
@@ -308,7 +369,17 @@ async def create_upload_file(file: UploadFile = File(...)):
         confidence = api_response.get("report", {}).get("ai_generated", {}).get("ai", {}).get("confidence", "N/A")
         
         detection_result = f"Verdict: {verdict.upper()}, Confidence: {confidence}"
-        return {"filename": file.filename, "detection_result": detection_result}
+        
+        # Extract additional details
+        report = api_response.get("report", {})
+        deepfake_confidence = report.get("deepfake", {}).get("confidence", "N/A")
+        nsfw_confidence = report.get("nsfw", {}).get("confidence", "N/A")
+
+        additional_info = f"<strong>Breakdown:</strong><br>Deepfake Confidence: {deepfake_confidence}<br>NSFW Confidence: {nsfw_confidence}"
+
+        exif_data = await get_exif_data(content)
+        
+        return {"filename": file.filename, "detection_result": detection_result, "exif_data": exif_data, "additional_info": additional_info, "google_reverse_search_url": google_reverse_search_url}
 
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"AI or Not API request failed: {e}")
