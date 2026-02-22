@@ -3,3 +3,9 @@ python-multipart
 uvicorn
 fastapi
 Pillow
+SQLAlchemy
+psycopg2-binary
+alembic
+httpx-oauth
+python-jose
+

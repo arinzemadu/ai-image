@@ -3,31 +3,35 @@ import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse
 from typing import Optional, Dict, Any, List
-from PIL import Image
+from PIL import Image, ExifTags
+from PIL.ExifTags import IFD
 from io import BytesIO
 import uuid
-import os
 from starlette.responses import FileResponse
 from pydantic import BaseModel
 import json
 import asyncio
 
+
 app = FastAPI()
 
 # API Keys and Base URLs
 AIORNOT_API_KEY = os.environ.get("AIORNOT_API_KEY")
-HIVE_API_KEY = os.environ.get("HIVE_API_KEY") # Placeholder for Hive AI
+SIGHTENGINE_API_USER = os.environ.get("SIGHTENGINE_API_USER")
+SIGHTENGINE_API_SECRET = os.environ.get("SIGHTENGINE_API_SECRET")
 
 if not AIORNOT_API_KEY:
     raise ValueError("AIORNOT_API_KEY environment variable not set")
+if not SIGHTENGINE_API_USER:
+    raise ValueError("SIGHTENGINE_API_USER environment variable not set")
+if not SIGHTENGINE_API_SECRET:
+    raise ValueError("SIGHTENGINE_API_SECRET environment variable not set")
+
 
 AIORNOT_API_BASE_URL = "https://api.aiornot.com"
-HIVE_API_URL = "https://api.thehive.ai/v2/task/sync" # Assumed URL
 
 TEMP_IMAGE_DIR = "/tmp/ai_media_detector_images"
 os.makedirs(TEMP_IMAGE_DIR, exist_ok=True)
-
-# --- Shared HTML Components ---
 
 def get_styles():
     return """
@@ -145,15 +149,6 @@ def get_footer():
     </html>
     """
 
-# --- API Call Functions ---
-
-async def call_hive_api(content: bytes, filename: str) -> Dict[str, Any]:
-    """Simulated function to call the Hive AI API."""
-    if not HIVE_API_KEY:
-        return {"service": "Hive AI", "status": "Not Configured", "verdict": "N/A", "confidence": 0}
-    await asyncio.sleep(0.8)
-    return {"service": "Hive AI", "status": "Success", "verdict": "AI-Generated", "confidence": 0.88}
-
 async def call_aiornot_api(content: bytes, filename: str, mime_type: str) -> Dict[str, Any]:
     """Function to call the AI or Not API."""
     try:
@@ -167,7 +162,59 @@ async def call_aiornot_api(content: bytes, filename: str, mime_type: str) -> Dic
     except Exception as e:
         return {"service": "AI or Not", "status": "Failed", "verdict": "Error", "confidence": 0}
 
-# --- Metadata Functions ---
+async def call_sightengine_api(content: bytes, filename: str, mime_type: str) -> Dict[str, Any]:
+    """Function to call the Sightengine API for AI-generated content detection."""
+    try:
+        # Sightengine API endpoint for image moderation
+        # We'll use the 'ai-generated' model
+        # Base API URL: https://api.sightengine.com/1.0/check.json
+        # Parameters: api_user, api_secret, models=ai-generated
+        
+        API_URL = "https://api.sightengine.com/1.0/check.json"
+        
+        files = {'media': (filename, content, mime_type)}
+        params = {
+            'api_user': SIGHTENGINE_API_USER,
+            'api_secret': SIGHTENGINE_API_SECRET,
+            'models': 'genai'
+        }
+
+        response = requests.post(API_URL, files=files, params=params)
+        response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
+        api_response = response.json()
+
+        verdict = "Unknown"
+        confidence = 0.0
+
+        if api_response and 'type' in api_response and 'ai_generated' in api_response['type']:
+            # The 'ai_generated' is a float directly under 'type' in this response structure
+            prob = api_response['type']['ai_generated'] 
+            
+            # Sightengine API often returns a probability directly for the genai model
+            if prob is not None:
+                # Assuming 'prob' directly represents the likelihood of being AI-generated
+                if prob > 0.5: # Example threshold
+                    verdict = "AI-Generated"
+                    confidence = prob
+                else:
+                    verdict = "Human-Made"
+                    # If it's not AI-generated, confidence in being human-made is 1 - prob
+                    confidence = 1.0 - prob 
+            else:
+                verdict = "Unknown (Prob not found in 'type'/'ai_generated')"
+                confidence = 0.0
+        else:
+            verdict = "Unknown (API response missing 'type' or 'ai_generated' within 'type')"
+            confidence = 0.0
+            print(f"DEBUG: Sightengine API - 'type' or 'ai_generated' key missing. Full API Response: {api_response}")        
+        return {"service": "Sightengine AI", "status": "Success", "verdict": verdict, "confidence": confidence}
+    except Exception as e:
+        print(f"DEBUG: Sightengine API Error: {e}")
+        return {"service": "Sightengine AI", "status": "Failed", "verdict": f"Error: {e}", "confidence": 0}
+
+
+
+
 
 @app.get("/temp_images/{image_name}")
 async def serve_temp_image(image_name: str):
@@ -181,19 +228,19 @@ async def get_exif_data(content: bytes) -> str:
         image = Image.open(BytesIO(content))
         exif_data = image.getexif()
         if not exif_data:
-            return "<strong>Warning:</strong> No EXIF data found. Image origin and history cannot be verified.<br>"
+            return "<strong>Warning:</strong> No EXIF data detected in this image.<br>"
         exif_info = "<strong>EXIF Data:</strong><br>"
         for tag_id, value in exif_data.items():
-            tag_name = Image.TAGS.get(tag_id, tag_id)
+            tag_name = ExifTags.TAGS.get(tag_id, tag_id)
             exif_info += f"{tag_name}: {value}<br>"
-        gps_info = exif_data.get_ifd(Image.Exif.GPSINFO)
+        gps_info = exif_data.get_ifd(IFD.GPSInfo)
         if gps_info:
             lat = convert_dms_to_degrees(gps_info.get(2), gps_info.get(1))
             lon = convert_dms_to_degrees(gps_info.get(4), gps_info.get(3))
             if lat and lon:
                 exif_info += f"GPS Location: <a href='https://www.google.com/maps?q={lat},{lon}' target='_blank'>View on Map</a><br>"
         return exif_info
-    except Exception:
+    except Exception as e:
         return "Could not read EXIF data."
 
 def convert_dms_to_degrees(dms, ref):
@@ -382,6 +429,8 @@ async def pricing_page():
     """ + get_footer()
     return html_content
 
+
+
 # --- API Endpoints ---
 
 @app.post("/uploadfile/")
@@ -394,18 +443,18 @@ async def create_upload_file(file: UploadFile = File(...)):
     # --- Gather Metadata and API Calls Concurrently ---
     exif_data_task = get_exif_data(content)
     aiornot_task = call_aiornot_api(content, file.filename, file.content_type)
-    hive_task = call_hive_api(content, file.filename)
+    sightengine_task = call_sightengine_api(content, file.filename, file.content_type)
 
     results = await asyncio.gather(
         exif_data_task,
         aiornot_task,
-        hive_task,
+        sightengine_task,
     )
     
-    exif_data, aiornot_result, hive_result = results
+    exif_data, aiornot_result, sightengine_result = results
     
     # --- Aggregate and Format Response ---
-    aggregated_results = [aiornot_result, hive_result]
+    aggregated_results = [aiornot_result, sightengine_result]
 
     # Save image temporarily to serve it for Google Reverse Image Search
     unique_filename = f"{uuid.uuid4()}_{file.filename}"
