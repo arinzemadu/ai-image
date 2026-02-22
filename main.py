@@ -37,10 +37,23 @@ def get_styles():
     return """
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        :root {
+            --primary-blue: #0056b3; /* A professional, slightly darker blue */
+            --light-bg: #f8f9fa; /* Very light background */
+            --container-bg: #ffffff; /* White for main content */
+            --dark-text: #212529; /* Dark text for readability */
+            --medium-text: #495057; /* Slightly lighter text for secondary info */
+            --border-color: #dee2e6; /* Light gray border */
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --hover-blue: #004494; /* Darker blue on hover */
+            --success-green: #28a745;
+            --fail-red: #dc3545;
+            --warning-orange: #ffc107;
+        }
         body { 
             font-family: 'Inter', sans-serif; 
-            background-color: #f4f7f9; 
-            color: #333; 
+            background-color: var(--light-bg); 
+            color: var(--dark-text); 
             display: flex; 
             flex-direction: column;
             align-items: center; 
@@ -50,71 +63,185 @@ def get_styles():
             box-sizing: border-box;
         }
         .container { 
-            background: #ffffff; 
-            padding: 2em 3em; 
-            border-radius: 12px; 
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
+            background: var(--container-bg); 
+            padding: 2.5em 3.5em; 
+            border-radius: 8px; /* Slightly less rounded for corporate feel */
+            box-shadow: 0 4px 12px var(--shadow-color); 
             text-align: center; 
             width: 100%; 
             max-width: 800px; 
+            margin-bottom: 2em;
         }
-        h1 { color: #1a202c; font-weight: 700; margin-bottom: 1.5em; }
+        h1 { 
+            color: var(--primary-blue); 
+            font-weight: 700; 
+            margin-bottom: 1.5em; 
+            letter-spacing: 0.02em; /* Softer letter spacing */
+            text-transform: none; /* Default capitalization */
+        }
+        h2 { color: var(--dark-text); margin-bottom: 1em; }
+        h3 { color: var(--primary-blue); margin-bottom: 0.8em; }
+
         nav { 
             width: 100%;
-            border-bottom: 1px solid #e2e8f0;
+            border-bottom: 1px solid var(--border-color);
             margin-bottom: 2em;
             padding-bottom: 1em;
+            display: flex;
+            justify-content: center;
+            gap: 1.5em;
         }
         nav a { 
-            color: #4a5568; 
+            color: var(--medium-text); 
             text-decoration: none; 
-            margin: 0 1.5em; 
             font-weight: 500; 
-            transition: color 0.3s;
-            padding-bottom: 1em;
+            transition: color 0.3s, border-bottom 0.3s;
+            padding-bottom: 0.8em;
             border-bottom: 2px solid transparent;
         }
-        nav a:hover { color: #2b6cb0; }
-        nav a.active { color: #2b6cb0; border-bottom-color: #2b6cb0; }
-        #uploadForm, #textForm { display: flex; flex-direction: column; align-items: center; }
+        nav a:hover { color: var(--primary-blue); }
+        nav a.active { color: var(--primary-blue); border-bottom-color: var(--primary-blue); }
+        
+        #uploadForm { display: flex; flex-direction: column; align-items: center; gap: 1em; }
         input[type="file"] { display: none; }
         .file-upload-label { 
-            border: 2px dashed #cbd5e0; 
+            border: 2px dashed var(--border-color); 
             border-radius: 8px; 
             padding: 3em; 
             cursor: pointer; 
             transition: all 0.3s; 
             width: 100%; 
-            margin-bottom: 1.5em;
-            background-color: #fcfdff;
+            background-color: var(--light-bg); /* Light background for upload area */
+            color: var(--medium-text);
+            font-weight: 500;
         }
-        .file-upload-label:hover { border-color: #2b6cb0; background-color: #f0f4f8; }
-        .file-upload-label span { font-weight: 500; color: #718096; }
-        #fileName { margin-top: -1em; margin-bottom: 1.5em; color: #2b6cb0; font-weight: 500; }
-        .primary-button { 
-            background: #2b6cb0; 
-            color: #ffffff; 
+        .file-upload-label:hover { 
+            border-color: var(--primary-blue); 
+            background-color: #e9ecef; /* Slightly darker on hover */
+            color: var(--dark-text);
+        }
+        #imagePreview { 
+            max-width: 200px; 
+            max-height: 200px; 
+            object-fit: contain; 
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 5px;
+            background-color: #ffffff; /* White background for image preview */
+        }
+        #fileName { 
+            color: var(--primary-blue); 
+            font-weight: 500; 
+            margin-top: 0.5em; 
+        }
+        .primary-button, .secondary-button { 
+            background: var(--primary-blue); 
+            color: #ffffff; /* White text on buttons */
             border: none; 
             padding: 0.8em 1.8em; 
-            border-radius: 8px; 
+            border-radius: 5px; /* Slightly less rounded */
             cursor: pointer; 
             font-size: 1em; 
             font-weight: 700; 
             transition: all 0.3s; 
+            box-shadow: 0 2px 5px var(--shadow-color);
+            text-transform: none; /* Default capitalization */
+            letter-spacing: 0;
         }
-        .primary-button:hover { background: #2c5282; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        #progress-container { width: 100%; background-color: #e2e8f0; border-radius: 8px; margin-top: 1.5em; overflow: hidden; display: none; }
-        #progress-bar { width: 0; height: 12px; background-color: #3182ce; border-radius: 8px; transition: width 0.3s; }
-        #progress-text { margin-top: 0.5em; font-size: 0.9em; color: #718096; display: none; }
-        #result { margin-top: 1.5em; font-size: 1.1em; font-weight: 400; line-height: 1.6; text-align: left; }
-        .result-card { background: #fdfdff; border: 1px solid #e2e8f0; padding: 1.5em; border-radius: 8px; margin-bottom: 1em; }
-        .result-card h3 { margin-top: 0; color: #1a202c; margin-bottom: 0.8em; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5em;}
-        .api-results-table { width: 100%; border-collapse: collapse; margin-bottom: 1em; }
-        .api-results-table th, .api-results-table td { padding: 0.8em; text-align: left; border-bottom: 1px solid #e2e8f0; }
-        .api-results-table th { font-weight: 700; color: #4a5568; }
-        .page-content p { color: #4a5568; font-size: 1.1em; line-height: 1.6; }
-        .page-content a { color: #2b6cb0; text-decoration: none; font-weight: 500; }
+        .primary-button:hover, .secondary-button:hover { 
+            background: var(--hover-blue); 
+            box-shadow: 0 4px 8px var(--shadow-color); 
+        }
+        .secondary-button {
+            background-color: var(--medium-text);
+        }
+        .secondary-button:hover {
+            background-color: #6c757d;
+        }
+
+        #progress-container { 
+            width: 100%; 
+            background-color: var(--border-color); 
+            border-radius: 8px; 
+            margin-top: 1.5em; 
+            overflow: hidden; 
+            display: none; 
+            height: 12px;
+        }
+        #progress-bar { 
+            width: 0; 
+            height: 100%; 
+            background-color: var(--primary-blue); 
+            border-radius: 8px; 
+            transition: width 0.3s ease-out; 
+        }
+        #progress-text { 
+            margin-top: 0.5em; 
+            font-size: 0.9em; 
+            color: var(--medium-text); 
+            display: none; 
+        }
+        #result { 
+            margin-top: 1.5em; 
+            font-size: 1em; /* Slightly smaller for corporate look */
+            line-height: 1.6; 
+            text-align: left; 
+            width: 100%;
+        }
+        .result-card { 
+            background: var(--container-bg); 
+            border: 1px solid var(--border-color); 
+            padding: 1.5em; 
+            border-radius: 8px; 
+            margin-bottom: 1.5em; 
+            box-shadow: 0 2px 8px var(--shadow-color);
+        }
+        .result-card h3 { 
+            margin-top: 0; 
+            color: var(--primary-blue); 
+            margin-bottom: 0.8em; 
+            border-bottom: 1px solid var(--border-color); 
+            padding-bottom: 0.5em;
+        }
+        .api-results-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-bottom: 1em; 
+            color: var(--dark-text); /* Dark text on light table background */
+        }
+        .api-results-table th, .api-results-table td { 
+            padding: 0.8em; 
+            text-align: left; 
+            border-bottom: 1px solid var(--border-color); 
+        }
+        .api-results-table th { 
+            font-weight: 700; 
+            color: var(--medium-text); 
+            text-transform: uppercase;
+            font-size: 0.85em; /* Slightly smaller for professionalism */
+        }
+        .page-content p { 
+            color: var(--medium-text); 
+            font-size: 1em; 
+            line-height: 1.6; 
+            margin-bottom: 1em;
+        }
+        .page-content a { 
+            color: var(--primary-blue); 
+            text-decoration: none; 
+            font-weight: 500; 
+        }
         .page-content a:hover { text-decoration: underline; }
+
+        .verdict-ai { color: var(--fail-red); font-weight: 700; }
+        .verdict-human { color: var(--success-green); font-weight: 700; }
+        .verdict-unknown { color: var(--warning-orange); font-weight: 700; } /* Use orange for unknown */
+        .button-group {
+            display: flex;
+            gap: 1em;
+            margin-top: 2em;
+            justify-content: center;
+        }
     </style>
     """
 
@@ -265,6 +392,7 @@ async def read_root():
             <label for="file-upload" class="file-upload-label"><span>Click to browse or drag & drop an image</span></label>
             <input id="file-upload" name="file" type="file" accept="image/*">
             <div id="fileName"></div>
+            <img id="imagePreview" src="#" alt="Image Preview" style="max-width: 100%; height: auto; margin-top: 1em; margin-bottom: 1em; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: none;">
             <button type="submit" class="primary-button">Analyze</button>
         </form>
         <div id="progress-container"><div id="progress-bar"></div></div>
@@ -272,11 +400,14 @@ async def read_root():
         <div id="result"></div>
     """ + get_footer()
     return html_content + """
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script>
         const form = document.getElementById('uploadForm');
         const fileInput = document.getElementById('file-upload');
         const fileNameDisplay = document.getElementById('fileName');
         const fileLabel = document.querySelector('.file-upload-label');
+        const imagePreview = document.getElementById('imagePreview'); // Get reference to the image preview
         const resultDiv = document.getElementById('result');
         const progressContainer = document.getElementById('progress-container');
         const progressBar = document.getElementById('progress-bar');
@@ -286,8 +417,22 @@ async def read_root():
             const file = event.target.files[0];
             if (file) {
                 fileNameDisplay.textContent = file.name;
+                // Show image preview
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        imagePreview.src = e.target.result;
+                        imagePreview.style.display = 'block'; // Make image visible
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    imagePreview.style.display = 'none'; // Hide if not an image
+                    imagePreview.src = '#'; // Clear src
+                }
             } else {
                 fileNameDisplay.textContent = '';
+                imagePreview.style.display = 'none'; // Hide if no file selected
+                imagePreview.src = '#'; // Clear src
             }
         });
 
@@ -344,6 +489,15 @@ async def read_root():
                     resultHtml += '</div>';
 
                     resultDiv.innerHTML = resultHtml;
+
+                    // Add PDF generation button
+                    const pdfButton = document.createElement('button');
+                    pdfButton.className = 'primary-button';
+                    pdfButton.textContent = 'Generate PDF Report';
+                    pdfButton.id = 'generatePdfButton';
+                    resultDiv.appendChild(pdfButton);
+
+                    pdfButton.addEventListener('click', () => generatePdfReport(data.filename));
                 } else {
                      resultDiv.textContent = `An error occurred during analysis (Status: ${xhr.status}).`;
                 }
@@ -360,6 +514,51 @@ async def read_root():
 
             xhr.send(formData);
         });
+
+        function generatePdfReport(filename) {
+            console.log("generatePdfReport called for filename:", filename);
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'pt', 'a4'); 
+            const content = document.getElementById('result');
+            console.log("Content element:", content);
+
+            if (!content) {
+                console.error("Content element for PDF generation not found!");
+                return;
+            }
+
+            console.log("Starting html2canvas...");
+            html2canvas(content, { 
+                scale: 2, // Increase scale for better resolution in PDF
+                useCORS: true // Important for images loaded from different origins (if any)
+            }).then(canvas => {
+                console.log("html2canvas generated canvas:", canvas);
+                const imgData = canvas.toDataURL('image/png');
+                console.log("Canvas toDataURL generated (first 50 chars):", imgData.substring(0, 50));
+
+                const imgWidth = 595.28; // A4 width in points
+                const pageHeight = 841.89; // A4 height in points
+                const imgHeight = canvas.height * imgWidth / canvas.width;
+                let heightLeft = imgHeight;
+
+                let position = 0;
+
+                doc.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pageHeight;
+
+                while (heightLeft >= 0) {
+                    position = heightLeft - pageHeight; // Adjusted this line for correct pagination
+                    doc.addPage();
+                    doc.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+                    heightLeft -= pageHeight;
+                }
+
+                doc.save(`AI_Media_Report_${filename}.pdf`);
+                console.log("PDF generated and saved.");
+            }).catch(error => {
+                console.error("Error generating PDF with html2canvas:", error);
+            });
+        }
     </script>
     """
 
