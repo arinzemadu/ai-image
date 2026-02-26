@@ -1,31 +1,134 @@
 import os
 import requests
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import HTMLResponse
-from typing import Optional, Dict, Any, List
-from PIL import Image, ExifTags
-from PIL.ExifTags import IFD
-from io import BytesIO
-import uuid
-from starlette.responses import FileResponse
-from pydantic import BaseModel
+import secrets
 import json
 import asyncio
+import uuid
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List, Annotated
+from io import BytesIO
 
+from dotenv import load_dotenv
+load_dotenv() # Load variables from .env if it exists
 
-app = FastAPI()
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.templating import Jinja2Templates
+from fastapi.encoders import jsonable_encoder
 
-# API Keys and Base URLs
+from sqlalchemy.orm import Session
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+
+from httpx_oauth.clients.google import GoogleOAuth2
+
+from PIL import Image, ExifTags
+from PIL.ExifTags import IFD
+from starlette.responses import FileResponse
+from pydantic import BaseModel
+
+from database import SessionLocal, engine
+from models import Base, User # Import Base from local models
+
+# Define API keys from environment variables
 AIORNOT_API_KEY = os.environ.get("AIORNOT_API_KEY")
 SIGHTENGINE_API_USER = os.environ.get("SIGHTENGINE_API_USER")
 SIGHTENGINE_API_SECRET = os.environ.get("SIGHTENGINE_API_SECRET")
 
-if not AIORNOT_API_KEY:
-    raise ValueError("AIORNOT_API_KEY environment variable not set")
-if not SIGHTENGINE_API_USER:
-    raise ValueError("SIGHTENGINE_API_USER environment variable not set")
-if not SIGHTENGINE_API_SECRET:
-    raise ValueError("SIGHTENGINE_API_SECRET environment variable not set")
+# Create all tables (only for development/initial setup, Alembic should manage in production)
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI()
+
+# --- Configuration for Google OAuth and JWT ---
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_urlsafe(32)) # Generate a strong secret key if not set
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+if not GOOGLE_CLIENT_ID:
+    raise ValueError("GOOGLE_CLIENT_ID environment variable not set")
+if not GOOGLE_CLIENT_SECRET:
+    raise ValueError("GOOGLE_CLIENT_SECRET environment variable not set")
+
+google_oauth_client = GoogleOAuth2(
+    GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+)
+
+# --- FastAPI Security ---
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# --- Dependency to get DB session ---
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# --- JWT Functions ---
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+# --- Pydantic Models for Authentication ---
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    email: Optional[str] = None
+
+class UserInDB(User): # Reusing SQLAlchemy User model for Pydantic
+    pass
+
+# --- User Authentication Functions ---
+def get_user(db: Session, email: str):
+    return db.query(User).filter(User.email == email).first()
+
+def authenticate_user(db: Session, email: str) -> Optional[User]:
+    user = get_user(db, email)
+    if not user:
+        return None
+    return user
+
+async def get_current_user(request: Request, db: Annotated[Session, Depends(get_db)]):
+    token = request.cookies.get("access_token")
+    if not token:
+        # Fallback to Authorization header
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+            
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    if not token:
+        raise credentials_exception
+        
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+        token_data = TokenData(email=email)
+    except JWTError:
+        raise credentials_exception
+    user = get_user(db, email=token_data.email)
+    if user is None:
+        raise credentials_exception
+    return user
 
 
 AIORNOT_API_BASE_URL = "https://api.aiornot.com"
@@ -274,7 +377,7 @@ def get_styles():
     </style>
     """
 
-def get_header(active_page: str):
+def get_header(active_page: str, request: Request):
     menu_items = {
         "Media Detector": "/",
         "Text Detector": "/aitext",
@@ -285,6 +388,20 @@ def get_header(active_page: str):
     for name, url in menu_items.items():
         is_active = "active" if name == active_page else ""
         nav_links += f'<a href="{url}" class="{is_active}">{name}</a>'
+    
+    # Add Login/Logout links dynamically
+    access_token = request.cookies.get("access_token")
+    if access_token:
+        try:
+            # Simple decode to show email
+            payload = jwt.decode(access_token, SECRET_KEY, algorithms=[ALGORITHM])
+            user_email = payload.get("sub", "User")
+            nav_links += f'<span style="color: var(--primary-accent); font-weight: 500;">{user_email}</span>'
+            nav_links += '<a href="/logout">Logout</a>'
+        except:
+            nav_links += '<a href="/login">Login</a>'
+    else:
+        nav_links += '<a href="/login">Login</a>'
     
     return f"""
     <head>
@@ -413,9 +530,22 @@ def convert_dms_to_degrees(dms, ref):
 # --- Page Endpoints ---
 
 @app.get("/", response_class=HTMLResponse)
-async def read_root():
-    """Serves the main AI Media Detector page."""
-    html_content = get_header("Media Detector") + """
+async def read_root(request: Request):
+    """Serves the main AI Media Detector page, only for logged-in users."""
+    access_token = request.cookies.get("access_token")
+    if not access_token:
+        return RedirectResponse(url="/login")
+        
+    try:
+        # Verify the token is still valid
+        jwt.decode(access_token, SECRET_KEY, algorithms=[ALGORITHM])
+    except:
+        # If token is invalid or expired, clear it and redirect to login
+        response = RedirectResponse(url="/login")
+        response.delete_cookie("access_token", samesite="lax")
+        return response
+
+    html_content = get_header("Media Detector", request) + """
         <h1>AI Media Verification Hub</h1>
         <form id="uploadForm" enctype="multipart/form-data" method="post">
             <label for="file-upload" class="file-upload-label"><span>Click to browse or drag & drop an image</span></label>
@@ -592,9 +722,9 @@ async def read_root():
     """
 
 @app.get("/aitext", response_class=HTMLResponse)
-async def aitext_page():
+async def aitext_page(request: Request):
     """Serves the AI Text Detector 'Coming Soon' page."""
-    html_content = get_header("Text Detector") + """
+    html_content = get_header("Text Detector", request) + """
         <h1>AI Text Detector</h1>
         <div class="page-content">
             <p>Our state-of-the-art AI text detection tool is currently under development.</p>
@@ -605,9 +735,9 @@ async def aitext_page():
     return html_content
 
 @app.get("/roadmap", response_class=HTMLResponse)
-async def roadmap_page():
+async def roadmap_page(request: Request):
     """Serves the Roadmap page."""
-    html_content = get_header("Roadmap") + """
+    html_content = get_header("Roadmap", request) + """
         <h1>Product Roadmap 2026</h1>
         <div class="page-content" style="text-align: left;">
             <p>We are committed to building the most comprehensive and trustworthy media verification hub for professionals. Below is our planned feature release schedule for 2026.</p>
@@ -639,9 +769,9 @@ async def roadmap_page():
     return html_content
 
 @app.get("/pricing", response_class=HTMLResponse)
-async def pricing_page():
+async def pricing_page(request: Request):
     """Serves the Pricing page."""
-    html_content = get_header("Pricing") + """
+    html_content = get_header("Pricing", request) + """
         <h1>Pricing</h1>
         <div class="page-content" style="text-align: left;">
             <p>We offer a range of plans to suit the needs of different organizations, from individual journalists to large-scale newsrooms.</p>
@@ -658,11 +788,99 @@ async def pricing_page():
     return html_content
 
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return HTMLResponse(content=f"""
+        {get_header("Login", request)}
+        <h1>Login</h1>
+        <div class="page-content">
+            <p>Please log in using your Google account to access all features.</p>
+            <a href="/login/google" class="primary-button">Login with Google</a>
+        </div>
+        {get_footer()}
+    """)
+
+@app.get("/login/google")
+async def login_google(request: Request):
+    base_url = os.environ.get("BASE_URL", str(request.base_url).rstrip("/"))
+    redirect_uri = f"{base_url}/auth/google/callback"
+    print(f"DEBUG: login_google redirect_uri: {redirect_uri}")
+    authorization_url = await google_oauth_client.get_authorization_url(redirect_uri)
+    return RedirectResponse(authorization_url)
+
+@app.get("/auth/google/callback", response_class=RedirectResponse)
+async def auth_google_callback(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)]
+):
+    try:
+        code = request.query_params.get("code")
+        if not code:
+            print("DEBUG: Missing code in query parameters")
+            raise HTTPException(status_code=400, detail="Missing code")
+        
+        base_url = os.environ.get("BASE_URL", str(request.base_url).rstrip("/"))
+        redirect_uri = f"{base_url}/auth/google/callback"
+        print(f"DEBUG: Using redirect_uri: {redirect_uri}")
+        
+        try:
+            token = await google_oauth_client.get_access_token(code, redirect_uri)
+            print("DEBUG: Successfully fetched access token")
+            user_id, email = await google_oauth_client.get_id_email(token["access_token"])
+            print(f"DEBUG: Fetched user email: {email}")
+        except Exception as oauth_err:
+            print(f"DEBUG: OAuth internal error type: {type(oauth_err)}")
+            print(f"DEBUG: OAuth internal error: {oauth_err}")
+            # If it has a response attribute (like GetIdEmailError), print the body
+            if hasattr(oauth_err, "response"):
+                print(f"DEBUG: Response status: {oauth_err.response.status_code}")
+                print(f"DEBUG: Response body: {oauth_err.response.text}")
+            raise HTTPException(status_code=400, detail=f"OAuth failed: {oauth_err}")
+        
+        if not email:
+            raise HTTPException(status_code=400, detail="Google did not return an email.")
+        
+        user = db.query(User).filter(User.email == email).first()
+        if not user:
+            # Create new user
+            user = User(email=email, subscription_plan="free", monthly_usage_count=0) # Add default values
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.email}, expires_delta=access_token_expires
+        )
+        
+        response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+        response.set_cookie(
+            key="access_token", 
+            value=access_token, 
+            httponly=True, 
+            max_age=int(access_token_expires.total_seconds()),
+            samesite="lax"
+        )
+        return response
+    except Exception as e:
+        import traceback
+        print(f"DEBUG: Exception in auth_google_callback: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=400, detail=f"Authentication failed: {str(e)}")
+
+@app.get("/logout", response_class=RedirectResponse)
+async def logout():
+    response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    response.delete_cookie("access_token", samesite="lax")
+    return response
 
 # --- API Endpoints ---
 
 @app.post("/uploadfile/")
-async def create_upload_file(file: UploadFile = File(...)):
+async def create_upload_file(
+    current_user: Annotated[User, Depends(get_current_user)],
+    file: UploadFile = File(...)
+):
     """
     Handles file uploads and concurrently sends them to multiple AI detection services.
     """
@@ -699,5 +917,6 @@ async def create_upload_file(file: UploadFile = File(...)):
         "aggregated_results": aggregated_results,
         "exif_data": exif_data,
         "google_reverse_search_url": google_reverse_search_url,
+        "user_email": current_user.email
     }
 
