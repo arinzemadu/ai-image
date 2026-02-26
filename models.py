@@ -7,9 +7,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
-    
-    # We will add hashed_password later when implementing login
-    # hashed_password = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=True) # Nullable because Google users don't have one
     
     stripe_customer_id = Column(String, unique=True, index=True, nullable=True)
     subscription_plan = Column(String, default="free", nullable=False)

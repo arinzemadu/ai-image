@@ -10,3 +10,4 @@ httpx-oauth
 python-jose
 python-dotenv
 passlib
+bcrypt

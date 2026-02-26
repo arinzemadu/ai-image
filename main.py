@@ -11,7 +11,7 @@ from io import BytesIO
 from dotenv import load_dotenv
 load_dotenv() # Load variables from .env if it exists
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
@@ -88,10 +88,19 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     email: Optional[str] = None
 
+class UserCreate(BaseModel):
+    email: str
+    password: str
+
 class UserInDB(User): # Reusing SQLAlchemy User model for Pydantic
     pass
 
 # --- User Authentication Functions ---
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
 def get_user(db: Session, email: str):
     return db.query(User).filter(User.email == email).first()
 
@@ -531,20 +540,57 @@ def convert_dms_to_degrees(dms, ref):
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    """Serves the main AI Media Detector page, only for logged-in users."""
+    """Serves the main AI Media Detector page. Shows landing page if not logged in."""
     access_token = request.cookies.get("access_token")
-    if not access_token:
-        return RedirectResponse(url="/login")
-        
-    try:
-        # Verify the token is still valid
-        jwt.decode(access_token, SECRET_KEY, algorithms=[ALGORITHM])
-    except:
-        # If token is invalid or expired, clear it and redirect to login
-        response = RedirectResponse(url="/login")
-        response.delete_cookie("access_token", samesite="lax")
-        return response
+    is_authenticated = False
+    
+    if access_token:
+        try:
+            # Verify the token is still valid
+            jwt.decode(access_token, SECRET_KEY, algorithms=[ALGORITHM])
+            is_authenticated = True
+        except:
+            is_authenticated = False
 
+    if not is_authenticated:
+        # --- Public Marketing Landing Page ---
+        html_content = get_header("Media Detector", request) + """
+            <div class="page-content" style="text-align: center; max-width: 800px; margin: 0 auto;">
+                <h1 style="font-size: 2.5em; margin-bottom: 0.5em;">Verify the Truth in a World of AI</h1>
+                <p style="font-size: 1.2em; color: var(--text-medium); margin-bottom: 2em;">
+                    Our AI Media Verification Hub helps you distinguish between human-made and AI-generated content with unparalleled accuracy. 
+                    Using state-of-the-art detection algorithms from multiple industry leaders, we provide a comprehensive analysis for journalists, researchers, and professionals.
+                </p>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2em; margin-bottom: 3em; text-align: left;">
+                    <div class="result-card">
+                        <h3>Multi-Engine Analysis</h3>
+                        <p>Aggregated results from top-tier AI detection services like AI or Not and Sightengine for a holistic verdict.</p>
+                    </div>
+                    <div class="result-card">
+                        <h3>Deep Metadata Inspection</h3>
+                        <p>Extract and analyze EXIF data to reveal hidden clues about the origin and history of an image.</p>
+                    </div>
+                    <div class="result-card">
+                        <h3>Reverse Image Search</h3>
+                        <p>Seamlessly cross-reference media across the web to identify its first appearance and potential reuse.</p>
+                    </div>
+                    <div class="result-card">
+                        <h3>Professional Reports</h3>
+                        <p>Generate detailed PDF reports of your findings to document and share your verification process.</p>
+                    </div>
+                </div>
+
+                <div style="background: rgba(0, 230, 230, 0.05); padding: 2.5em; border-radius: 12px; border: 1px solid rgba(0, 230, 230, 0.2);">
+                    <h3>Ready to start verifying?</h3>
+                    <p style="margin-bottom: 1.5em;">Join thousands of professionals who trust our hub for accurate media authentication.</p>
+                    <a href="/login" class="primary-button" style="text-decoration: none; display: inline-block;">Get Started for Free</a>
+                </div>
+            </div>
+        """ + get_footer()
+        return html_content
+
+    # --- Authenticated Tool View ---
     html_content = get_header("Media Detector", request) + """
         <h1>AI Media Verification Hub</h1>
         <form id="uploadForm" enctype="multipart/form-data" method="post">
@@ -793,12 +839,119 @@ async def login_page(request: Request):
     return HTMLResponse(content=f"""
         {get_header("Login", request)}
         <h1>Login</h1>
-        <div class="page-content">
-            <p>Please log in using your Google account to access all features.</p>
-            <a href="/login/google" class="primary-button">Login with Google</a>
+        <div class="page-content" style="max-width: 400px; margin: 0 auto;">
+            <p style="background: rgba(0, 230, 230, 0.1); padding: 1em; border-radius: 8px; border: 1px solid var(--primary-accent); font-size: 0.9em; margin-bottom: 2em;">
+                <strong>Recommended:</strong> Use Google Login for the best experience. Password recovery is currently unavailable for email accounts; please contact <a href="mailto:support@mdutools.com" style="color: var(--primary-accent);">support@mdutools.com</a> if you need a manual reset.
+            </p>
+            <form action="/login" method="POST" style="display: flex; flex-direction: column; gap: 1em; text-align: left;">
+                <label>Email: <input type="email" name="username" required style="padding: 0.8em; border-radius: 5px; border: 1px solid var(--border-glow); background: var(--dark-background); color: white; width: 100%; box-sizing: border-box;"></label>
+                <label>Password: <input type="password" name="password" required style="padding: 0.8em; border-radius: 5px; border: 1px solid var(--border-glow); background: var(--dark-background); color: white; width: 100%; box-sizing: border-box;"></label>
+                <button type="submit" class="primary-button">Login</button>
+            </form>
+            <hr style="margin: 2em 0; border: 0; border-top: 1px solid rgba(0, 230, 230, 0.2);">
+            <p>Or continue with:</p>
+            <a href="/login/google" class="primary-button" style="text-decoration: none; display: inline-block; width: 100%; box-sizing: border-box;">Login with Google</a>
+            <p style="margin-top: 2em;">Don't have an account? <a href="/register">Register here</a></p>
         </div>
         {get_footer()}
     """)
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    return HTMLResponse(content=f"""
+        {get_header("Register", request)}
+        <h1>Register</h1>
+        <div class="page-content" style="max-width: 400px; margin: 0 auto;">
+            <p style="background: rgba(0, 230, 230, 0.1); padding: 1em; border-radius: 8px; border: 1px solid var(--primary-accent); font-size: 0.9em; margin-bottom: 2em;">
+                <strong>Recommended:</strong> Use Google Login for seamless access and account recovery.
+            </p>
+            <form action="/register" method="POST" style="display: flex; flex-direction: column; gap: 1em; text-align: left;">
+                <label>Email: <input type="email" name="email" required style="padding: 0.8em; border-radius: 5px; border: 1px solid var(--border-glow); background: var(--dark-background); color: white; width: 100%; box-sizing: border-box;"></label>
+                <label>Password: <input type="password" name="password" required style="padding: 0.8em; border-radius: 5px; border: 1px solid var(--border-glow); background: var(--dark-background); color: white; width: 100%; box-sizing: border-box;"></label>
+                <p style="font-size: 0.8em; color: var(--text-medium); margin: 0;">Password must be at least 8 characters long and include an uppercase letter and a number.</p>
+                <button type="submit" class="primary-button">Register</button>
+            </form>
+            <p style="margin-top: 2em;">Already have an account? <a href="/login">Login here</a></p>
+        </div>
+        {get_footer()}
+    """)
+
+@app.post("/register")
+async def register(
+    email: Annotated[str, Form(...)], 
+    password: Annotated[str, Form(...)], 
+    db: Annotated[Session, Depends(get_db)]
+):
+    # Security: check if user exists
+    db_user = db.query(User).filter(User.email == email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Password Strength Validation
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters long")
+    if not any(char.isdigit() for char in password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one number")
+    if not any(char.isupper() for char in password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter")
+    
+    # Security: hash the password!
+    hashed_pwd = get_password_hash(password)
+    
+    new_user = User(
+        email=email, 
+        hashed_password=hashed_pwd,
+        subscription_plan="free",
+        monthly_usage_count=0
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    # Auto-login after registration
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": new_user.email}, expires_delta=access_token_expires
+    )
+    
+    response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    response.set_cookie(
+        key="access_token", 
+        value=access_token, 
+        httponly=True, 
+        max_age=int(access_token_expires.total_seconds()),
+        samesite="lax"
+    )
+    return response
+
+@app.post("/login")
+async def login_post(
+    username: Annotated[str, Form(...)], # OAuth2 standard uses "username" field for email
+    password: Annotated[str, Form(...)],
+    db: Annotated[Session, Depends(get_db)]
+):
+    user = db.query(User).filter(User.email == username).first()
+    if not user or not user.hashed_password:
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    
+    # Security: verify hashed password
+    if not verify_password(password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    
+    response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    response.set_cookie(
+        key="access_token", 
+        value=access_token, 
+        httponly=True, 
+        max_age=int(access_token_expires.total_seconds()),
+        samesite="lax"
+    )
+    return response
 
 @app.get("/login/google")
 async def login_google(request: Request):
