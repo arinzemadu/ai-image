@@ -10,4 +10,4 @@ httpx-oauth
 python-jose
 python-dotenv
 passlib
-bcrypt
+bcrypt==3.2.0
